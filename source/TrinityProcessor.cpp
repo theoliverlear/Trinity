@@ -9,9 +9,38 @@ TrinityAudioProcessor::TrinityAudioProcessor()
 {
 }
 
+void TrinityAudioProcessor::initDspProcessSpec(double sampleRate, int samplesPerBlock, dsp::ProcessSpec& spec)
+{
+    spec.sampleRate = sampleRate;
+    spec.maximumBlockSize = static_cast<uint32> (samplesPerBlock);
+    spec.numChannels = 1;
+}
+
+void TrinityAudioProcessor::initCrossoverFilters(dsp::ProcessSpec spec)
+{
+    for (auto& filter : this->lowMidCrossover)
+    {
+        filter.reset();
+        filter.setType (dsp::LinkwitzRileyFilterType::lowpass);
+        filter.setCutoffFrequency (250.0f);
+        filter.prepare(spec);
+    }
+
+    for (auto& filter : this->midHighCrossover)
+    {
+        filter.reset();
+        filter.setType (dsp::LinkwitzRileyFilterType::lowpass);
+        filter.setCutoffFrequency(2000.0f);
+        filter.prepare(spec);
+    }
+}
+
 void TrinityAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
-    ignoreUnused(sampleRate, samplesPerBlock);
+    ignoreUnused (samplesPerBlock);
+    dsp::ProcessSpec spec;
+    initDspProcessSpec(sampleRate, samplesPerBlock, spec);
+    this->initCrossoverFilters(spec);
 }
 
 bool TrinityAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
@@ -31,16 +60,17 @@ void TrinityAudioProcessor::processBlock(AudioBuffer<float>& buffer,
                                          MidiBuffer& midi)
 {
     ScopedNoDenormals noDenormals;
-    ignoreUnused(midi);
+    ignoreUnused (midi);
 
-    for (int channel = this->getTotalNumInputChannels(); channel < this->getTotalNumOutputChannels(); ++channel)
+    for (int channel = getTotalNumInputChannels(); channel < getTotalNumOutputChannels(); ++channel)
     {
         buffer.clear(channel, 0, buffer.getNumSamples());
     }
 
-    float peak = 0.0f;
-    const int numChannels = jmin(this->getTotalNumInputChannels(), buffer.getNumChannels());
+    const int numChannels = buffer.getNumChannels();
     const int numSamples = buffer.getNumSamples();
+
+    float totalPeak = 0.0f;
 
     for (int channel = 0; channel < numChannels; ++channel)
     {
@@ -48,15 +78,46 @@ void TrinityAudioProcessor::processBlock(AudioBuffer<float>& buffer,
         for (int i = 0; i < numSamples; ++i)
         {
             const float absValue = std::abs(data[i]);
-            if (absValue > peak)
+            if (absValue > totalPeak)
             {
-                peak = absValue;
+                totalPeak = absValue;
             }
         }
     }
 
-    peak = jlimit(0.0f, 1.0f, peak);
-    this->rmsLevel.store(peak);
+    float lowPeak  = 0.0f;
+    float midPeak  = 0.0f;
+    float highPeak = 0.0f;
+
+    for (int channel = 0; channel < numChannels; ++channel)
+    {
+        const float* src = buffer.getReadPointer(channel);
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            float lowSample  = 0.0f;
+            float residual = 0.0f;
+            float midSample  = 0.0f;
+            float highSample = 0.0f;
+
+            this->lowMidCrossover[channel].processSample (0, src[i], lowSample, residual);
+
+            this->midHighCrossover[channel].processSample (0, residual, midSample, highSample);
+
+            const float lowSamplePeak = std::abs(lowSample);
+            const float midSamplePeak = std::abs(midSample);
+            const float highSamplePeak = std::abs(highSample);
+
+            if (lowSamplePeak > lowPeak) lowPeak  = lowSamplePeak;
+            if (midSamplePeak > midPeak) midPeak  = midSamplePeak;
+            if (highSamplePeak > highPeak) highPeak = highSamplePeak;
+        }
+    }
+
+    this->totalLevel.store(jlimit(0.0f, 1.0f, totalPeak));
+    this->lowLevel.store(jlimit(0.0f, 1.0f, lowPeak));
+    this->midLevel.store(jlimit(0.0f, 1.0f, midPeak));
+    this->highLevel.store(jlimit(0.0f, 1.0f, highPeak));
 }
 
 void TrinityAudioProcessor::processBlock(AudioBuffer<double>& buffer,
@@ -74,9 +135,7 @@ void TrinityAudioProcessor::processBlock(AudioBuffer<double>& buffer,
             dest[i] = static_cast<float>(src[i]);
         }
     }
-
     processBlock(temp, midi);
-
     for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
     {
         const float* src = temp.getReadPointer(channel);
