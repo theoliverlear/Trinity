@@ -2,11 +2,10 @@
 #include "TrinityEditor.h"
 
 TrinityAudioProcessor::TrinityAudioProcessor()
-    : AudioProcessor (
+    : AudioProcessor(
         BusesProperties()
             .withInput("Input",  AudioChannelSet::stereo(), true)
-            .withOutput("Output", AudioChannelSet::stereo(), true)
-      )
+            .withOutput("Output", AudioChannelSet::stereo(), true))
 {
 }
 
@@ -18,8 +17,9 @@ void TrinityAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock
 bool TrinityAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
 {
     auto mainOut = layouts.getMainOutputChannelSet();
+    const bool isInvalidChannelSet = mainOut != AudioChannelSet::mono()
+                                  && mainOut != AudioChannelSet::stereo();
 
-    const bool isInvalidChannelSet = mainOut != AudioChannelSet::mono() && mainOut != AudioChannelSet::stereo();
     if (isInvalidChannelSet || layouts.getMainInputChannelSet() != mainOut)
     {
         return false;
@@ -33,54 +33,58 @@ void TrinityAudioProcessor::processBlock(AudioBuffer<float>& buffer,
     ScopedNoDenormals noDenormals;
     ignoreUnused(midi);
 
-    float sumSquares = 0.0f;
-    int totalSamples = buffer.getNumSamples() * buffer.getNumChannels();
+    for (int channel = this->getTotalNumInputChannels(); channel < this->getTotalNumOutputChannels(); ++channel)
+    {
+        buffer.clear(channel, 0, buffer.getNumSamples());
+    }
 
-    for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+    float peak = 0.0f;
+    const int numChannels = jmin(this->getTotalNumInputChannels(), buffer.getNumChannels());
+    const int numSamples = buffer.getNumSamples();
+
+    for (int channel = 0; channel < numChannels; ++channel)
     {
         const float* data = buffer.getReadPointer(channel);
-
-        for (int sampleIndex = 0; sampleIndex < buffer.getNumSamples(); ++sampleIndex)
+        for (int i = 0; i < numSamples; ++i)
         {
-            float sampleValue = data[sampleIndex];
-            sumSquares += sampleValue * sampleValue;
+            const float absValue = std::abs(data[i]);
+            if (absValue > peak)
+            {
+                peak = absValue;
+            }
         }
     }
 
-    if (totalSamples > 0)
-    {
-        float rms = std::sqrt(sumSquares / static_cast<float> (totalSamples));
-
-        rms = jlimit(0.0f, 1.0f, rms);
-        this->rmsLevel.store(rms);
-    }
+    peak = jlimit(0.0f, 1.0f, peak);
+    this->rmsLevel.store(peak);
 }
 
 void TrinityAudioProcessor::processBlock(AudioBuffer<double>& buffer,
-                                          MidiBuffer& midi)
+                                         MidiBuffer& midi)
 {
-    AudioBuffer<float> temp (buffer.getNumChannels(), buffer.getNumSamples());
+    AudioBuffer<float> temp(buffer.getNumChannels(), buffer.getNumSamples());
 
     for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
     {
-        const double* source = buffer.getReadPointer(channel);
+        const double* src = buffer.getReadPointer(channel);
         float* dest = temp.getWritePointer(channel);
 
-        for (int sampleIndex = 0; sampleIndex < buffer.getNumSamples(); ++sampleIndex)
+        for (int i = 0; i < buffer.getNumSamples(); ++i)
         {
-            dest[sampleIndex] = static_cast<float> (source[sampleIndex]);
+            dest[i] = static_cast<float>(src[i]);
         }
     }
+
     processBlock(temp, midi);
 
     for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
     {
-        const float* source = temp.getReadPointer(channel);
+        const float* src = temp.getReadPointer(channel);
         double* dest = buffer.getWritePointer(channel);
 
-        for (int sampleIndex = 0; sampleIndex < buffer.getNumSamples(); ++sampleIndex)
+        for (int i = 0; i < buffer.getNumSamples(); ++i)
         {
-            dest[sampleIndex] = static_cast<double> (source[sampleIndex]);
+            dest[i] = static_cast<double>(src[i]);
         }
     }
 }
