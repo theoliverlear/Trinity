@@ -16,8 +16,11 @@ public:
 
 private:
     TrinityAudioProcessor& processor;
-    float displayLevel = 0.0f;
     void timerCallback() override;
+    float displayTotal { 0.0f };
+    float displayLow { 0.0f };
+    float displayMid { 0.0f };
+    float displayHigh { 0.0f };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TrinityAudioProcessorEditor)
 };
