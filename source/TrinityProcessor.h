@@ -7,6 +7,9 @@ class TrinityAudioProcessor : public AudioProcessor
 {
 public:
     TrinityAudioProcessor();
+    static void initDspProcessSpec(double sampleRate, int samplesPerBlock,
+                                      dsp::ProcessSpec& spec);
+    void initCrossoverFilters(dsp::ProcessSpec spec);
     ~TrinityAudioProcessor() override = default;
 
     const String getName() const override { return "Trinity"; }
@@ -39,10 +42,23 @@ public:
 
     float getRMSLevel() const noexcept { return rmsLevel.load(); }
 
+    float getTotalLevel() const noexcept { return totalLevel.load(); }
+    float getLowLevel() const noexcept { return lowLevel.load(); }
+    float getMidLevel() const noexcept { return midLevel.load(); }
+    float getHighLevel() const noexcept { return highLevel.load(); }
+
 private:
     std::atomic<float> rmsLevel { 0.0f };
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TrinityAudioProcessor)
+    std::atomic<float> totalLevel { 0.0f };
+    std::atomic<float> lowLevel { 0.0f };
+    std::atomic<float> midLevel { 0.0f };
+    std::atomic<float> highLevel { 0.0f };
+
+    dsp::LinkwitzRileyFilter<float> lowMidCrossover[2];
+    dsp::LinkwitzRileyFilter<float> midHighCrossover[2];
+
+    dsp::ProcessSpec processSpec {};
 };
 
 AudioProcessor* JUCE_CALLTYPE createPluginFilter();
