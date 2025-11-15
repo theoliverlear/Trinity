@@ -45,7 +45,7 @@ jobs:
           start:           ${{ github.event.inputs.start }}
           end:             ${{ github.event.inputs.end }}
           openai_key:      ${{ secrets.OPENAI_KEY }}
-          github_token:    ${{ secrets.GITHUB_TOKEN }}
+          github_token:    ${{ secrets.GH_TOKEN }}
           x_api_key:       ${{ secrets.X_API_KEY }}
           x_secret:        ${{ secrets.X_SECRET }}
           x_access_token:  ${{ secrets.X_ACCESS_TOKEN }}
