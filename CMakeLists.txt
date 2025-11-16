@@ -30,6 +30,8 @@ target_sources(Trinity PRIVATE
         source/TrinityProcessor.h
         source/TrinityEditor.cpp
         source/TrinityEditor.h
+        source/components/GraphicalSpectrumAnalyzer.cpp
+        source/components/GraphicalSpectrumAnalyzer.h
 )
 
 target_compile_definitions(Trinity PRIVATE
