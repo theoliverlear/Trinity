@@ -2,42 +2,7 @@
 #include "TrinityProcessor.h"
 #include <vector>
 #include <cmath>
-
-namespace
-{
-    Colour getColourFromDb(float db)
-    {
-        using namespace juce;
-
-        constexpr float greenToYellowStartDb = -20.0f;
-        constexpr float yellowToRedStartDb = -10.0f;
-        constexpr float maxDb = 0.0f;
-
-        if (db <= greenToYellowStartDb)
-        {
-            return Colours::green;
-        }
-
-        if (db <= yellowToRedStartDb)
-        {
-            const float ratio = (db - greenToYellowStartDb)
-                            / (yellowToRedStartDb - greenToYellowStartDb);
-            const uint8 red = static_cast<uint8> (ratio * 255.0f);
-            const uint8 green = 255u;
-            return Colour::fromRGB (red, green, 0u);
-        }
-
-        if (db <= maxDb)
-        {
-            const float ratio = (db - yellowToRedStartDb)
-                            / (maxDb - yellowToRedStartDb);
-            const uint8 red = 255u;
-            const uint8 green = static_cast<uint8> ((1.0f - ratio) * 255.0f); // 255 -> 0
-            return Colour::fromRGB (red, green, 0u);
-        }
-        return Colours::red;
-    }
-}
+#include "services/LevelColourScale.h"
 
 void TrinityAudioProcessorEditor::initSpectrumAnalyzerControls()
 {
@@ -48,6 +13,11 @@ void TrinityAudioProcessorEditor::initSpectrumAnalyzerControls()
     this->addAndMakeVisible(this->btnTestEnabled);
     this->addAndMakeVisible(this->cbxTestType);
     this->addAndMakeVisible(this->btnDebugCsv);
+
+    // Solo buttons
+    this->addAndMakeVisible(this->btnSoloLow);
+    this->addAndMakeVisible(this->btnSoloMid);
+    this->addAndMakeVisible(this->btnSoloHigh);
 
     // Diagnostics toggles and sliders
     this->addAndMakeVisible(this->btnUiSmooth);
@@ -66,7 +36,7 @@ void TrinityAudioProcessorEditor::initSpectrumAnalyzerButtons()
     this->cbxTestType.addItem("White noise",  TrinityAudioProcessor::kWhiteNoise);
     this->cbxTestType.addItem("Pink-ish noise", TrinityAudioProcessor::kPinkNoise);
     this->cbxTestType.addItem("Log sweep",    TrinityAudioProcessor::kLogSweep);
-    this->cbxTestType.setSelectedId(TrinityAudioProcessor::kSine17k, juce::dontSendNotification);
+    this->cbxTestType.setSelectedId(TrinityAudioProcessor::kSine17k, dontSendNotification);
 }
 
 TrinityAudioProcessorEditor::TrinityAudioProcessorEditor(
@@ -74,8 +44,8 @@ TrinityAudioProcessorEditor::TrinityAudioProcessorEditor(
     : AudioProcessorEditor(&processorRef),
       processor(processorRef)
 {
-    // Increase default editor size for better readability
-    this->setSize(420, 560);
+    // Increase default editor size for better readability and less cramped UI
+    this->setSize(700, 800);
     this->startTimerHz(30);
     this->meters = {
         MeterInfo { &this->displayTotal, "Total" },
@@ -84,9 +54,13 @@ TrinityAudioProcessorEditor::TrinityAudioProcessorEditor(
         MeterInfo { &this->displayHigh,  "High"  },
     };
 
-    initSpectrumAnalyzerControls();
+    this->initSpectrumAnalyzerControls();
 
-    initSpectrumAnalyzerButtons();
+    this->initSpectrumAnalyzerButtons();
+
+    // Add meters component and connect its four child meters to our level pointers
+    this->addAndMakeVisible(this->audioMeters);
+    this->audioMeters.setMeters(this->meters);
 
     this->btnTestEnabled.onClick = [this]
     {
@@ -104,47 +78,101 @@ TrinityAudioProcessorEditor::TrinityAudioProcessorEditor(
         {
             this->debugHeaderWritten = false;
             this->ensureDebugStreamOpen();
+            this->processor.setDebugCaptureEnabled (true);
         }
         else
         {
             this->debugStream.reset();
+            this->processor.setDebugCaptureEnabled (false);
         }
     };
 
+    // Solo button wiring (mutually exclusive)
+    this->btnSoloLow.onClick = [this]
+    {
+        const bool shouldSolo = this->btnSoloLow.getToggleState();
+        this->btnSoloMid.setToggleState(false, dontSendNotification);
+        this->btnSoloHigh.setToggleState(false, dontSendNotification);
+        this->processor.setSoloMode(shouldSolo ? TrinityAudioProcessor::SoloMode::Low
+                                               : TrinityAudioProcessor::SoloMode::None);
+    };
+
+    this->btnSoloMid.onClick = [this]
+    {
+        const bool shouldSolo = this->btnSoloMid.getToggleState();
+        this->btnSoloLow.setToggleState(false, dontSendNotification);
+        this->btnSoloHigh.setToggleState(false, dontSendNotification);
+        this->processor.setSoloMode(shouldSolo ? TrinityAudioProcessor::SoloMode::Mid
+                                               : TrinityAudioProcessor::SoloMode::None);
+    };
+
+    this->btnSoloHigh.onClick = [this]
+    {
+        const bool shouldSolo = this->btnSoloHigh.getToggleState();
+        this->btnSoloLow.setToggleState(false, dontSendNotification);
+        this->btnSoloMid.setToggleState(false, dontSendNotification);
+        this->processor.setSoloMode(shouldSolo ? TrinityAudioProcessor::SoloMode::High
+                                               : TrinityAudioProcessor::SoloMode::None);
+    };
+
+    // Initial state
+    this->btnSoloLow.setToggleState(false, dontSendNotification);
+    this->btnSoloMid.setToggleState(false, dontSendNotification);
+    this->btnSoloHigh.setToggleState(false, dontSendNotification);
+    this->processor.setSoloMode(TrinityAudioProcessor::SoloMode::None);
+
     // Initialize and wire diagnostics controls
-    this->btnUiSmooth.setToggleState (true, dontSendNotification);
-    this->btnUiPeaks .setToggleState (true, dontSendNotification);
-    this->spectrumAnalyzer.setSmoothingEnabled (true);
-    this->spectrumAnalyzer.setPeakHoldEnabled (true);
-    this->btnUiSmooth.onClick = [this]{ this->spectrumAnalyzer.setSmoothingEnabled (this->btnUiSmooth.getToggleState()); };
-    this->btnUiPeaks .onClick = [this]{ this->spectrumAnalyzer.setPeakHoldEnabled  (this->btnUiPeaks.getToggleState()); };
+    this->btnUiSmooth.setToggleState(true, dontSendNotification);
+    this->btnUiPeaks .setToggleState(true, dontSendNotification);
+    this->spectrumAnalyzer.setSmoothingEnabled(true);
+    this->spectrumAnalyzer.setPeakHoldEnabled(true);
+    this->btnUiSmooth.onClick = [this]
+    {
+        this->spectrumAnalyzer.setSmoothingEnabled(this->btnUiSmooth.getToggleState());
+    };
+    this->btnUiPeaks .onClick = [this]
+    {
+        this->spectrumAnalyzer.setPeakHoldEnabled(this->btnUiPeaks.getToggleState());
+    };
 
-    this->btnFreqSmooth.setButtonText ("Freq Smooth");
-    this->btnBandSmooth.setButtonText ("Band Smooth");
-    this->btnFreqSmooth.setToggleState (true, juce::dontSendNotification);
-    this->btnBandSmooth.setToggleState (true, juce::dontSendNotification);
-    this->btnFreqSmooth.onClick = [this]{ this->processor.setFreqSmoothingEnabled (this->btnFreqSmooth.getToggleState()); };
-    this->btnBandSmooth.onClick = [this]{ this->processor.setBandSmoothingEnabled (this->btnBandSmooth.getToggleState()); };
+    this->btnFreqSmooth.setButtonText("Freq Smooth");
+    this->btnBandSmooth.setButtonText("Band Smooth");
+    this->btnFreqSmooth.setToggleState(true, dontSendNotification);
+    this->btnBandSmooth.setToggleState(true, dontSendNotification);
+    this->btnFreqSmooth.onClick = [this]
+    {
+        this->processor.setFreqSmoothingEnabled(this->btnFreqSmooth.getToggleState());
+    };
+    this->btnBandSmooth.onClick = [this]
+    {
+        this->processor.setBandSmoothingEnabled(this->btnBandSmooth.getToggleState());
+    };
 
-    this->sldGuardPercent.setRange (0.0, 0.2, 0.001);
-    this->sldGuardPercent.setTextValueSuffix (" guard");
-    this->sldGuardPercent.setSliderStyle (juce::Slider::LinearHorizontal);
-    this->sldGuardPercent.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 60, 18);
-    this->sldGuardPercent.setValue (0.06, juce::dontSendNotification);
-    this->sldGuardPercent.onValueChange = [this]{ this->processor.setGuardPercent ((float) this->sldGuardPercent.getValue()); };
+    this->sldGuardPercent.setRange(0.0, 0.2, 0.001);
+    this->sldGuardPercent.setTextValueSuffix(" guard");
+    this->sldGuardPercent.setSliderStyle(Slider::LinearHorizontal);
+    this->sldGuardPercent.setTextBoxStyle(Slider::TextBoxLeft, false, 60, 18);
+    this->sldGuardPercent.setValue (0.06, dontSendNotification);
+    this->sldGuardPercent.onValueChange = [this]
+    {
+        this->processor.setGuardPercent (static_cast<float>(this->sldGuardPercent.getValue()));
+    };
 
-    this->sldTaperPercent.setRange (0.0, 0.2, 0.001);
-    this->sldTaperPercent.setTextValueSuffix (" taper");
-    this->sldTaperPercent.setSliderStyle (juce::Slider::LinearHorizontal);
-    this->sldTaperPercent.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 60, 18);
-    this->sldTaperPercent.setValue (0.02, juce::dontSendNotification);
-    this->sldTaperPercent.onValueChange = [this]{ this->processor.setTaperPercent ((float) this->sldTaperPercent.getValue()); };
+    this->sldTaperPercent.setRange(0.0, 0.2, 0.001);
+    this->sldTaperPercent.setTextValueSuffix(" taper");
+    this->sldTaperPercent.setSliderStyle(Slider::LinearHorizontal);
+    this->sldTaperPercent.setTextBoxStyle(Slider::TextBoxLeft, false, 60, 18);
+    this->sldTaperPercent.setValue(0.02, dontSendNotification);
+    this->sldTaperPercent.onValueChange = [this]
+    {
+        this->processor.setTaperPercent ((float) this->sldTaperPercent.getValue());
+    };
 
     this->sldSpecSmoothing.setRange (0.0, 1.0, 0.001);
     this->sldSpecSmoothing.setTextValueSuffix (" specSmooth");
-    this->sldSpecSmoothing.setSliderStyle (juce::Slider::LinearHorizontal);
-    this->sldSpecSmoothing.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 60, 18);
-    this->sldSpecSmoothing.setValue (0.2, juce::dontSendNotification);
+    this->sldSpecSmoothing.setSliderStyle (Slider::LinearHorizontal);
+    this->sldSpecSmoothing.setTextBoxStyle (Slider::TextBoxLeft, false, 60, 18);
+    this->sldSpecSmoothing.setValue (0.2, dontSendNotification);
     this->sldSpecSmoothing.onValueChange = [this]{ this->processor.setSpecSmoothing ((float) this->sldSpecSmoothing.getValue()); };
 
     // Provide frequency range so the analyzer can draw Hz ticks.
@@ -152,7 +180,7 @@ TrinityAudioProcessorEditor::TrinityAudioProcessorEditor(
     this->spectrumAnalyzer.setFrequencyRange(20.0f, static_cast<float>(this->processor.getDisplayMaxHz()));
 
     // Ensure layout is applied now and on any future resizes
-    this->resized();
+    this->TrinityAudioProcessorEditor::resized();
 }
 
 void TrinityAudioProcessorEditor::updateDisplayAndSmoothLevels()
@@ -173,18 +201,18 @@ void TrinityAudioProcessorEditor::timerCallback()
 {
     this->updateDisplayAndSmoothLevels();
     {
-        std::vector<float> mags;
-        this->processor.copySpectrum(mags); // values expected in [0..1]
-        if (!mags.empty())
+        std::vector<float> spectrumMagnitudes;
+        this->processor.copySpectrum(spectrumMagnitudes); // values in [0..1]
+        if (!spectrumMagnitudes.empty())
         {
-            this->spectrumAnalyzer.setMagnitudes(mags);
+            this->spectrumAnalyzer.setMagnitudes(spectrumMagnitudes);
         }
     }
 
-    // Keep analyzer frequency ticks aligned to processor's current display maximum
+    // Keep analyzer ticks aligned to processor's current display maximum
     this->spectrumAnalyzer.setFrequencyRange(20.0f, static_cast<float>(this->processor.getDisplayMaxHz()));
 
-    // Optional debug CSV snapshot (throttled)
+    // Throttled debug CSV snapshot
     if (this->btnDebugCsv.getToggleState())
     {
         if (++this->debugFrameCounter >= 15) // ~0.5s at 30 Hz
@@ -194,93 +222,71 @@ void TrinityAudioProcessorEditor::timerCallback()
         }
     }
 
-    this->repaint();
+    // Advance meters UI state (peak-hold/clip)
+    this->audioMeters.advanceFrame();
+    this->repaint(); // repaint editor backdrop; child meters repaint internally
 }
 
 void TrinityAudioProcessorEditor::resized()
 {
-    // Layout: spectrum top ~60%, then two controls rows, bottom meters
     auto bounds = this->getLocalBounds();
-    auto topArea = bounds.removeFromTop((int) std::round(bounds.getHeight() * 0.60f));
+    auto topArea = bounds.removeFromTop((int) std::round(bounds.getHeight() * 0.40f));
     this->spectrumAnalyzer.setBounds(topArea);
 
-    const int controlsHeight = 72;
+    const int controlsHeight = 132;
     auto controlsArea = bounds.removeFromTop(controlsHeight);
-    auto row1 = controlsArea.removeFromTop(controlsHeight / 2);
-    auto row2 = controlsArea;
+    auto row1 = controlsArea.removeFromTop(controlsHeight / 3);
+    auto row2 = controlsArea.removeFromTop(controlsHeight / 3);
+    auto row3 = controlsArea; // dedicated solo buttons row
 
-    const int pad = 6;
+    const int pad = 8;
     const int h1 = row1.getHeight() - pad * 2;
-    int x1 = row1.getX() + pad;
-    this->btnTestEnabled.setBounds(x1, row1.getY() + pad, 110, h1); x1 += 110 + pad;
-    this->cbxTestType.setBounds (x1, row1.getY() + pad, 150, h1);    x1 += 150 + pad;
-    this->btnDebugCsv.setBounds (x1, row1.getY() + pad, 100, h1);
+    const int wTest = 130;
+    const int wType = 200;
+    const int wCsv  = 110;
+    const int gap1 = pad * 2; // larger gaps for the top row
+    const int totalTopWidth = wTest + wType + wCsv + gap1 * 2;
+    const int x1Start = row1.getX() + (row1.getWidth() - totalTopWidth) / 2;
+    const int y1 = row1.getY() + (row1.getHeight() - h1) / 2; // vertically center within the row
 
+    int x1 = x1Start;
+    this->btnTestEnabled.setBounds(x1, y1, wTest, h1); x1 += wTest + gap1;
+    this->cbxTestType.setBounds(x1, y1, wType, h1);    x1 += wType + gap1;
+    this->btnDebugCsv.setBounds(x1, y1, wCsv,  h1);
+
+    // Row 2: diagnostics toggles and sliders
     const int h2 = row2.getHeight() - pad * 2;
     int x2 = row2.getX() + pad;
-    this->btnUiSmooth.setBounds (x2, row2.getY() + pad, 96, h2); x2 += 96 + pad;
-    this->btnUiPeaks .setBounds (x2, row2.getY() + pad, 90, h2); x2 += 90 + pad;
-    this->btnFreqSmooth.setBounds (x2, row2.getY() + pad, 110, h2); x2 += 110 + pad;
-    this->btnBandSmooth.setBounds (x2, row2.getY() + pad, 110, h2); x2 += 110 + pad;
-    const int sliderW = 160;
-    this->sldGuardPercent.setBounds (x2, row2.getY() + pad, sliderW, h2); x2 += sliderW + pad;
-    this->sldTaperPercent.setBounds (x2, row2.getY() + pad, sliderW, h2); x2 += sliderW + pad;
-    this->sldSpecSmoothing.setBounds (x2, row2.getY() + pad, sliderW, h2);
+    this->btnUiSmooth.setBounds(x2, row2.getY() + pad, 120, h2); x2 += 120 + pad;
+    this->btnUiPeaks.setBounds(x2, row2.getY() + pad, 112, h2); x2 += 112 + pad;
+    this->btnFreqSmooth.setBounds(x2, row2.getY() + pad, 140, h2); x2 += 140 + pad;
+    this->btnBandSmooth.setBounds(x2, row2.getY() + pad, 140, h2); x2 += 140 + pad;
+    const int sliderW = 220;
+    this->sldGuardPercent.setBounds(x2, row2.getY() + pad, sliderW, h2); x2 += sliderW + pad;
+    this->sldTaperPercent.setBounds(x2, row2.getY() + pad, sliderW, h2); x2 += sliderW + pad;
+    this->sldSpecSmoothing.setBounds(x2, row2.getY() + pad, sliderW, h2);
+
+    // Row 3: Solo buttons only (own dedicated row), centered horizontally
+    const int h3 = row3.getHeight() - pad * 2;
+    const int soloW = 120;
+    const int gaps = 2; // between three buttons
+    const int totalSoloWidth = soloW * 3 + pad * gaps;
+    const int x3Start = row3.getX() + (row3.getWidth() - totalSoloWidth) / 2;
+    const int y3 = row3.getY() + (row3.getHeight() - h3) / 2; // vertical centering within row
+
+    int x3 = x3Start;
+    this->btnSoloLow.setBounds(x3, y3, soloW, h3); x3 += soloW + pad;
+    this->btnSoloMid.setBounds(x3, y3, soloW, h3); x3 += soloW + pad;
+    this->btnSoloHigh.setBounds(x3, y3, soloW, h3);
+
+    // Remaining area is for the meters component
+    this->audioMeters.setBounds (bounds);
 }
 
 void TrinityAudioProcessorEditor::paint(Graphics& graphics)
 {
     using namespace juce;
     graphics.fillAll(Colours::black);
-    constexpr float minDb = -60.0f;
-
-    // Layout areas: top ~60% reserved for spectrum component, then two controls rows (72px), bottom for meters
-    auto layoutBounds = this->getLocalBounds();
-    auto topAreaPaint = layoutBounds.removeFromTop((int) std::round(layoutBounds.getHeight() * 0.60f));
-    juce::ignoreUnused(topAreaPaint);
-    auto controlsPaint = layoutBounds.removeFromTop(72); juce::ignoreUnused(controlsPaint);
-    auto bottomHalf = layoutBounds; // remaining area
-
-    const int numMeters = this->meters.size();
-    // Enlarge meters for clarity
-    const int meterWidth = 56;
-    const int meterGap = 12;
-    const int totalWidth = numMeters * meterWidth + (numMeters - 1) * meterGap;
-    const int startX = bottomHalf.getX() + (bottomHalf.getWidth() - totalWidth) / 2;
-    const int bottomY = bottomHalf.getBottom();
-
-    graphics.setFont(16.0f);
-
-    for (int i = 0; i < numMeters; ++i)
-    {
-        const auto& meter = this->meters[static_cast<std::size_t>(i)];
-        const float levelLinear = meter.levelPtr != nullptr ? *meter.levelPtr : 0.0f;
-        const float db = Decibels::gainToDecibels(levelLinear, minDb);
-        float normalised = jmap(db, minDb, 0.0f, 0.0f, 1.0f);
-        normalised = jlimit(0.0f, 1.0f, normalised);
-        const float meterHeight = normalised * static_cast<float>(bottomHalf.getHeight() - 40); // leave space for labels
-        const int meterPositionX = startX + i * (meterWidth + meterGap);
-        const int meterPositionY = bottomY - static_cast<int>(meterHeight);
-
-        // Use dB for colour choice
-        graphics.setColour(getColourFromDb(db));
-
-        graphics.fillRect(meterPositionX, meterPositionY, meterWidth, static_cast<int>(meterHeight));
-
-        graphics.setColour(Colours::white);
-        // Labels at the top of the bottom area
-        Rectangle labelArea(meterPositionX, bottomHalf.getY(), meterWidth, 20);
-        graphics.drawFittedText(meter.label, labelArea, Justification::centred, 1);
-
-        if (levelLinear > 0.0f)
-        {
-            Rectangle dbArea(meterPositionX, bottomHalf.getY() + 20, meterWidth, 20);
-            graphics.drawFittedText(String(db, 1) + " dB",
-                                    dbArea,
-                                    Justification::centred,
-                                    1);
-        }
-    }
 }
 
 void TrinityAudioProcessorEditor::ensureDebugStreamOpen()
@@ -300,52 +306,66 @@ void TrinityAudioProcessorEditor::ensureDebugStreamOpen()
     }
 }
 
+String TrinityAudioProcessorEditor::getInitHeader(std::vector<float> tailPreSmooth, std::vector<float> tailPostSmooth, std::vector<float> tailPostTaper, std::vector<float> bandsPreSmooth, std::vector<float> bandsFinal)
+{
+    String header = "csvVersion=2\n";
+    header += "frame,hiGuard,allowedEndBin,allowedEndHz,sampleRate,fftSize,displayMaxHz";
+    for (size_t i = 0; i < tailPreSmooth.size(); ++i)
+    {
+        header += ",preSmoothTail" + String(static_cast<int>(i));
+    }
+    for (size_t i = 0; i < tailPostSmooth.size(); ++i)
+    {
+        header += ",postSmoothTail" + String(static_cast<int>(i));
+    }
+    for (size_t i = 0; i < tailPostTaper.size(); ++i)
+    {
+        header += ",postTaperTail" + String(static_cast<int>(i));
+    }
+    for (size_t i = 0; i < bandsPreSmooth.size(); ++i)
+    {
+        header += ",bandPre" + String(static_cast<int>(i));
+    }
+    for (size_t i = 0; i < bandsFinal.size(); ++i)
+    {
+        header += ",bandFinal" + String(static_cast<int>(i));
+    }
+    header += "\n";
+    return header;
+}
+
 void TrinityAudioProcessorEditor::writeDebugCsvSnapshot()
 {
-    ensureDebugStreamOpen();
+    this->ensureDebugStreamOpen();
     if (!this->debugStream || !this->debugStream->openedOk())
     {
         return;
     }
 
     // New extended debug data
-    std::vector<float> tailPre, tailPostSmooth, tailPostTaper;
-    std::vector<float> bandsPre, bandsFinal;
-    int hiGuard = 0;
-    int allowedEndBin = 0;
-    double allowedEndHz = 0.0;
-    double sr = 0.0; int n = 0;
-    double dispMax = 0.0;
-    this->processor.copyDebugData (tailPre, tailPostSmooth, tailPostTaper,
-                             bandsPre, bandsFinal,
-                             hiGuard, allowedEndBin, allowedEndHz,
-                             sr, n, dispMax);
+    std::vector<float> tailPreSmooth;
+    std::vector<float> tailPostSmooth;
+    std::vector<float> tailPostTaper;
+    std::vector<float> bandsPreSmooth;
+    std::vector<float> bandsFinal;
+    int hiGuardBinsLocal = 0;
+    int allowedEndBinLocal = 0;
+    double allowedEndHzLocal = 0.0;
+    double sampleRateHzLocal = 0.0; 
+    int fftSizeLocal = 0;
+    double displayMaxHzLocal = 0.0;
+    this->processor.copyDebugData(tailPreSmooth, tailPostSmooth, tailPostTaper,
+                                  bandsPreSmooth, bandsFinal,
+                                  hiGuardBinsLocal, allowedEndBinLocal, allowedEndHzLocal,
+                                  sampleRateHzLocal, fftSizeLocal, displayMaxHzLocal);
 
     if (!this->debugHeaderWritten)
     {
-        String header = "csvVersion=2\n";
-        header += "frame,hiGuard,allowedEndBin,allowedEndHz,sampleRate,fftSize,displayMaxHz";
-        for (size_t i = 0; i < tailPre.size(); ++i)
-        {
-            header += ",preSmoothTail" + String(static_cast<int>(i));
-        }
-        for (size_t i = 0; i < tailPostSmooth.size(); ++i)
-        {
-            header += ",postSmoothTail" + String(static_cast<int>(i));
-        }
-        for (size_t i = 0; i < tailPostTaper.size(); ++i)
-        {
-            header += ",postTaperTail" + String(static_cast<int>(i));
-        }
-        for (size_t i = 0; i < bandsPre.size(); ++i)
-        {
-            header += ",bandPre" + String(static_cast<int>(i));
-        }
-        for (size_t i = 0; i < bandsFinal.size(); ++i)
-        {
-            header += ",bandFinal" + String(static_cast<int>(i));
-        }
-        header += "\n";
+        String header = getInitHeader(tailPreSmooth,
+                                   tailPostSmooth,
+                                   tailPostTaper,
+                                   bandsPreSmooth,
+                                   bandsFinal);
         // writeString is portable across JUCE versions
         this->debugStream->writeString(header);
         this->debugHeaderWritten = true;
@@ -353,14 +373,14 @@ void TrinityAudioProcessorEditor::writeDebugCsvSnapshot()
 
     static long long csvFrameIndex = 0;
     String line;
-    line << (++csvFrameIndex) << "," << hiGuard << "," << allowedEndBin << "," << allowedEndHz
-         << "," << sr << "," << n << "," << dispMax;
-    for (float value : tailPre)        line << "," << value;
-    for (float value : tailPostSmooth) line << "," << value;
-    for (float value : tailPostTaper)  line << "," << value;
-    for (float value : bandsPre)       line << "," << value;
-    for (float value : bandsFinal)     line << "," << value;
+    line << ++csvFrameIndex << "," << hiGuardBinsLocal << "," << allowedEndBinLocal << "," << allowedEndHzLocal
+         << "," << sampleRateHzLocal << "," << fftSizeLocal << "," << displayMaxHzLocal;
+    for (float value : tailPreSmooth)  { line << "," << value; }
+    for (float value : tailPostSmooth) { line << "," << value; }
+    for (float value : tailPostTaper)  { line << "," << value; }
+    for (float value : bandsPreSmooth) { line << "," << value; }
+    for (float value : bandsFinal)     { line << "," << value; }
     line << "\n";
-    debugStream->writeString(line);
-    debugStream->flush();
+    this->debugStream->writeString(line);
+    this->debugStream->flush();
 }
