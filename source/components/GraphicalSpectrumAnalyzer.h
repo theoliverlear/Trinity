@@ -4,6 +4,10 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
+#include "../models/FrequencyRange.h"
+#include "../models/UiDynamicsSettings.h"
+#include "../models/SpectrumAnalyzerStyle.h"
+#include "../models/SegmentedFrequencyLayout.h"
 
 class GraphicalSpectrumAnalyzer : public Component
 {
@@ -14,23 +18,23 @@ public:
     // Enable/disable internal UI smoothing (attack/release). Default: enabled.
     void setSmoothingEnabled(bool enabled)
     {
-        this->smoothingEnabled = enabled;
+        this->uiSettings.smoothingEnabled = enabled;
         this->repaint();
     }
     bool isSmoothingEnabled() const noexcept
     {
-        return this->smoothingEnabled;
+        return this->uiSettings.smoothingEnabled;
     }
 
     // Enable/disable peak-hold markers. Default: enabled.
     void setPeakHoldEnabled(bool enabled)
     {
-        this->peakHoldEnabled = enabled;
+        this->uiSettings.peakHoldEnabled = enabled;
         this->repaint();
     }
     bool isPeakHoldEnabled() const noexcept
     {
-        return this->peakHoldEnabled;
+        return this->uiSettings.peakHoldEnabled;
     }
 
     // Set the display frequency range used for drawing tick marks
@@ -56,23 +60,33 @@ private:
     // peak-hold values per bin
     std::vector<float> peaks;
 
-    // Style and dynamics
-    float attackCoeff { 0.35f }; // faster rise
-    float releaseCoeff { 0.08f }; // slower fall
-    float peakHoldDecay { 0.97f }; // per update decay
-
-    bool smoothingEnabled { true };
-    bool peakHoldEnabled { true };
+    // Style and dynamics consolidated
+    UiDynamicsSettings uiSettings {};
 
     // Frequency range for labels/ticks
-    float freqMinHz { 20.0f };
-    float freqMaxHz { 20000.0f };
+    FrequencyRange frequencyRange {};
+
+    // Extracted styles/config
+    VisualTuning visualTuning {};
+    GridStyleConfig gridStyle {};
+    SpectrumRenderStyle spectrumStyle {};
+    PeakMarkerStyle peakStyle {};
+    VignetteStyle vignetteStyle {};
+    SegmentedFrequencyLayout segmentedLayout {};
+    AnalyzerBackgroundStyle backgroundStyle {};
+    SpectrumFillGradientStyle fillStyle {};
 
     void applySmoothingAndPeaks();
 
     // Helpers (extracted for readability)
-    // Map frequency to x (log scale within current [freqMinHz, freqMaxHz] range)
+    // Map frequency to x (log scale within current display range)
     float mapLogFrequencyToX(float hz, float xLeft, float xRight) const noexcept;
+
+    // Custom segmented mapping requested by design:
+    // 0–100 Hz = 10% width, 100–1k = 30%, 1k–10k = 40%, 10k–20k = 20%.
+    // Within each segment, use logarithmic spacing between the segment bounds
+    // to preserve perceptual distribution while enforcing the exact width ratios.
+    float mapSegmentedFrequencyToX(float hz, float xLeft, float xRight) const noexcept;
 
     // Frequency label formatting (e.g., 1k, 10k, 250)
     static String formatFrequencyLabel(float frequency) noexcept;
@@ -81,7 +95,22 @@ private:
     void drawGrid(Graphics& graphics, Rectangle<float> bounds) const;
 
     // Vignette overlay
-    void drawVignetteOverlay (Graphics& graphics, Rectangle<float> bounds) const;
+    void drawVignetteOverlay(Graphics& graphics, Rectangle<float> bounds) const;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GraphicalSpectrumAnalyzer)
+    // New helpers to improve readability and maintainability
+    // Draw subtle background rectangles for Low/Mid/High bands
+    void drawBandBackgrounds(Graphics& graphics, Rectangle<float> bounds) const;
+
+    // Build the spectrum line (open) and fill (closed) paths given current smoothed magnitudes
+    void buildSpectrumPaths(const Rectangle<float>& bounds,
+                            Path& outLinePath,
+                            Path& outFillPath) const;
+
+    // Draw peak-hold markers
+    void drawPeakMarkers(Graphics& graphics, Rectangle<float> bounds) const;
+
+    // Map a band/bin index to x position across [xLeft, xRight] with linear spacing
+    static float computeBinXPosition(int binIndex, int binCount, float xLeft, float xRight) noexcept;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(GraphicalSpectrumAnalyzer)
 };
