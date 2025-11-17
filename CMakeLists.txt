@@ -1,4 +1,32 @@
 cmake_minimum_required(VERSION 3.22)
+include(FetchContent)
+
+# Ensure MSVC uses the DLL runtime (MD/MDd) consistently across all targets, including dependencies
+if (MSVC)
+    # Applies to targets that honour this variable (CMake >= 3.15)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+endif()
+
+# GoogleTest (used for unit tests)
+FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG v1.15.0
+)
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
+
+# As a safety net, also force the MSVC runtime on gtest targets (in case toolchain defaults differ)
+if (MSVC)
+    foreach(gtest_tgt IN ITEMS gtest gtest_main)
+        if (TARGET ${gtest_tgt})
+            # Ensure /MD or /MDd
+            set_property(TARGET ${gtest_tgt} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+            # Align iterator debugging level in Debug to avoid LNK2038 with JUCE-built objects
+            target_compile_definitions(${gtest_tgt} PRIVATE $<$<CONFIG:Debug>:_ITERATOR_DEBUG_LEVEL=2>)
+        endif()
+    endforeach()
+endif()
 
 project(Trinity VERSION 0.1.0 LANGUAGES C CXX)
 
@@ -30,6 +58,10 @@ target_sources(Trinity PRIVATE
         source/TrinityProcessor.h
         source/TrinityEditor.cpp
         source/TrinityEditor.h
+        source/components/AudioMeter.cpp
+        source/components/AudioMeter.h
+        source/components/AudioSpectrumMeters.cpp
+        source/components/AudioSpectrumMeters.h
         source/components/GraphicalSpectrumAnalyzer.cpp
         source/components/GraphicalSpectrumAnalyzer.h
 )
@@ -49,3 +81,8 @@ target_link_libraries(Trinity PRIVATE
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags
 )
+
+# Enable and add tests
+include(CTest)
+enable_testing()
+add_subdirectory(test)
