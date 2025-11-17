@@ -237,7 +237,7 @@ void GraphicalSpectrumAnalyzer::applySmoothingAndPeaks()
 void GraphicalSpectrumAnalyzer::drawBandBackgrounds(Graphics& graphics, Rectangle<float> bounds) const
 {
     using namespace juce;
-    const PlotGeometry plot = PlotGeometry::fromRect(bounds);
+    const PlotGeometry plot = PlotGeometry::fromRectangle(bounds);
 
     BandFrequencies splits;
     const float minFrequencyHz = std::max(1.0f, this->frequencyRange.clampedMin());
