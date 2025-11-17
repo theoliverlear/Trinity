@@ -5,6 +5,7 @@
 
 #include "models/MeterInfo.h"
 #include "components/GraphicalSpectrumAnalyzer.h"
+#include "components/AudioSpectrumMeters.h"
 
 class TrinityAudioProcessor;
 
@@ -30,11 +31,17 @@ private:
     float displayHigh { 0.0f };
     std::array<MeterInfo, 4> meters;
     GraphicalSpectrumAnalyzer spectrumAnalyzer;
+    AudioSpectrumMeters audioMeters;
 
     // Controls for built-in test signal and debug CSV
     ToggleButton btnTestEnabled { "Test Signal" };
     ComboBox    cbxTestType;
     ToggleButton btnDebugCsv { "Debug CSV" };
+
+    // Solo buttons for bands
+    ToggleButton btnSoloLow  { "Solo Low" };
+    ToggleButton btnSoloMid  { "Solo Mid" };
+    ToggleButton btnSoloHigh { "Solo High" };
 
     // A/B diagnostics controls (Standalone convenience)
     ToggleButton btnUiSmooth { "UI Smooth" };
@@ -53,5 +60,10 @@ private:
 
     void writeDebugCsvSnapshot();
     void ensureDebugStreamOpen();
+    static String getInitHeader(std::vector<float> tailPreSmooth,
+                             std::vector<float> tailPostSmooth,
+                             std::vector<float> tailPostTaper,
+                             std::vector<float> bandsPreSmooth,
+                             std::vector<float> bandsFinal);
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TrinityAudioProcessorEditor)
 };
