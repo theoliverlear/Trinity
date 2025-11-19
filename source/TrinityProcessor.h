@@ -3,7 +3,11 @@
 #include <JuceHeader.h>
 #include <atomic>
 #include <vector>
+#include <memory>
+#include <spdlog/logger.h>
+#include <spdlog/sinks/stdout_color_sinks-inl.h>
 
+#include "models/BandFrequencies.h"
 #include "models/SoloMode.h"
 
 class TrinityAudioProcessor : public AudioProcessor
@@ -13,10 +17,10 @@ public:
     // Expose SoloMode as a nested type for call sites that expect
     // TrinityAudioProcessor::SoloMode::X while keeping the enum defined
     // in models/SoloMode.h as the single source of truth.
-    using SoloMode = ::SoloMode;
     static void initDspProcessSpec(double sampleRate, int samplesPerBlock,
                                       dsp::ProcessSpec& spec);
     void initCrossoverFilters(dsp::ProcessSpec spec);
+    static void initCrossoverFilter(dsp::ProcessSpec spec, auto& crossover, BandFrequencies bandCutoff);
     ~TrinityAudioProcessor() override = default;
 
     const String getName() const override { return "Trinity"; }
@@ -93,6 +97,7 @@ public:
     void setDebugCaptureEnabled (bool enabled) noexcept { debugCaptureEnabled.store (enabled); }
 
 private:
+    std::shared_ptr<spdlog::logger> console { spdlog::stdout_color_mt("Trinity") };
     std::atomic<float> rmsLevel { 0.0f };
 
     std::atomic<float> totalLevel { 0.0f };
@@ -154,7 +159,7 @@ private:
 
 public:
     // Debug/Standalone tuning controls
-    void setFreqSmoothingEnabled (bool newFreqSmoothEnabled) noexcept
+    void setFreqSmoothingEnabled(bool newFreqSmoothEnabled) noexcept
     {
         this->freqSmoothEnabled.store(newFreqSmoothEnabled);
     }
@@ -162,8 +167,8 @@ public:
     {
         this->bandSmoothEnabled.store(newBandSmoothingEnabled);
     }
-    void setGuardPercent (float newGuardPercent) noexcept;
-    void setTaperPercent (float newTaperPercent) noexcept
+    void setGuardPercent(float newGuardPercent) noexcept;
+    void setTaperPercent(float newTaperPercent) noexcept
     {
         this->taperPercent.store(jlimit(0.0f, 0.2f, newTaperPercent));
     }
