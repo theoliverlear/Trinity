@@ -12,18 +12,19 @@ AudioSpectrumMeters::AudioSpectrumMeters()
 
 void AudioSpectrumMeters::initDbRanges()
 {
-    this->meters[0].setDbRange(-120.0f, 0.0f);
-    this->meters[1].setDbRange(-120.0f, 0.0f);
-    this->meters[2].setDbRange(-120.0f, 0.0f);
-    this->meters[3].setDbRange(-120.0f, 0.0f);
+    for (int i = 0; i < meters.size(); ++i)
+    {
+        this->meters[i].setDbRange(-120.0f, 0.0f);
+    }
 }
 
 void AudioSpectrumMeters::initTickDisplays()
 {
     this->meters[0].setShowTicks(true);
-    this->meters[1].setShowTicks(false);
-    this->meters[2].setShowTicks(false);
-    this->meters[3].setShowTicks(false);
+    for (int i = 1; i < meters.size(); ++i)
+    {
+        this->meters[i].setShowTicks(false);
+    }
 }
 
 void AudioSpectrumMeters::setMeters(const std::array<MeterInfo, 4>& meterInfos)
@@ -31,9 +32,10 @@ void AudioSpectrumMeters::setMeters(const std::array<MeterInfo, 4>& meterInfos)
     // Connect external level pointers and labels
     for (int meterIndex = 0; meterIndex < 4; ++meterIndex)
     {
-        this->meters[static_cast<size_t>(meterIndex)].setLevelPointer(meterInfos[(size_t) meterIndex].levelPtr);
-        this->meters[static_cast<size_t>(meterIndex)].setLabel(meterInfos[(size_t) meterIndex].label != nullptr
-                                                   ? String(meterInfos[(size_t) meterIndex].label)
+        size_t meter_index = static_cast<size_t>(meterIndex);
+        this->meters[meter_index].setLevelPointer(meterInfos[meterIndex].levelPtr);
+        this->meters[meter_index].setLabel(meterInfos[meterIndex].label != nullptr
+                                                   ? String(meterInfos[meterIndex].label)
                                                    : String());
     }
     // Configure dB range and tick visibility
@@ -42,7 +44,8 @@ void AudioSpectrumMeters::setMeters(const std::array<MeterInfo, 4>& meterInfos)
     this->meters[0].setLeftGutterWidth(this->metrics.leftGutterWidth);
     for (int meterIndex = 1; meterIndex < 4; ++meterIndex)
     {
-        this->meters[static_cast<size_t>(meterIndex)].setLeftGutterWidth (0.0f);
+        size_t meter_index = static_cast<size_t>(meterIndex);
+        this->meters[meter_index].setLeftGutterWidth(0.0f);
     }
 
     this->resized();
@@ -82,14 +85,10 @@ void AudioSpectrumMeters::layoutMetersWithin(Rectangle<int> bounds)
     int xPosition = bounds.getX() + (bounds.getWidth() - totalGroupWidth) / 2;
     const int meterHeight = bounds.getHeight();
 
-    // First meter gets gutter + content width
-    this->meters[0].setBounds (xPosition, bounds.getY(), firstMeterGutter + meterColumnWidth, meterHeight);
-    xPosition += firstMeterGutter + meterColumnWidth + gapBetweenMeters;
-
-    // Remaining meters share the same content width
-    this->meters[1].setBounds (xPosition, bounds.getY(), meterColumnWidth, meterHeight);
-    xPosition += meterColumnWidth + gapBetweenMeters;
-    this->meters[2].setBounds (xPosition, bounds.getY(), meterColumnWidth, meterHeight);
-    xPosition += meterColumnWidth + gapBetweenMeters;
-    this->meters[3].setBounds (xPosition, bounds.getY(), meterColumnWidth, meterHeight);
+    for (int i = 0; i < meters.size(); ++i)
+    {
+        int initialGutter = i == 0 ? firstMeterGutter : 0;
+        this->meters[i].setBounds(xPosition, bounds.getY(), meterColumnWidth + initialGutter, meterHeight);
+        xPosition += meterColumnWidth + initialGutter + gapBetweenMeters;
+    }
 }
