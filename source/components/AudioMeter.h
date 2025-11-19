@@ -225,7 +225,8 @@ private:
             const float decibels = Decibels::gainToDecibels(currentLevel, minDb);
             graphics.setColour(Colours::white.withAlpha(0.8f));
             Rectangle dbArea(static_cast<int>(columnBounds.getX()), static_cast<int>(columnBounds.getY()) + 20, static_cast<int>(columnBounds.getWidth()), 20);
-            graphics.drawFittedText(String(decibels, 1) + " dB", dbArea, Justification::centred, 1);
+            String dbText = String(decibels, 1) + " dB";
+            graphics.drawFittedText(dbText, dbArea, Justification::centred, 1);
         }
     }
 
