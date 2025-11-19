@@ -86,7 +86,7 @@ float GraphicalSpectrumAnalyzer::mapLogFrequencyToX(float hz, float xLeft, float
     return xLeft + normalisedPosition * (xRight - xLeft);
 }
 
-float GraphicalSpectrumAnalyzer::mapSegmentedFrequencyToX (float hz, float xLeft, float xRight) const noexcept
+float GraphicalSpectrumAnalyzer::mapSegmentedFrequencyToX(float hz, float xLeft, float xRight) const noexcept
 {
     using namespace juce;
     const float width = xRight - xLeft;
@@ -122,7 +122,7 @@ void GraphicalSpectrumAnalyzer::drawGrid(Graphics& graphics, Rectangle<float> bo
     graphics.setColour(Colours::white.withAlpha(this->gridStyle.gridLineAlpha));
     for (int divisionIndex = 1; divisionIndex < this->gridStyle.horizontalDivisions; ++divisionIndex)
     {
-        const float y = bottomY - (plotHeight * static_cast<float>(divisionIndex) / static_cast<float>(this->gridStyle.horizontalDivisions));
+        const float y = bottomY - plotHeight * static_cast<float>(divisionIndex) / static_cast<float>(this->gridStyle.horizontalDivisions);
         graphics.drawLine(leftX, y, rightX, y, 1.0f);
     }
 
@@ -239,14 +239,15 @@ void GraphicalSpectrumAnalyzer::drawBandBackgrounds(Graphics& graphics, Rectangl
     using namespace juce;
     const PlotGeometry plot = PlotGeometry::fromRectangle(bounds);
 
-    BandFrequencies splits;
     const float minFrequencyHz = std::max(1.0f, this->frequencyRange.clampedMin());
     const float maxFrequencyHz = std::max(minFrequencyHz * 1.01f, this->frequencyRange.clampedMax());
 
-    const float xMin = mapSegmentedFrequencyToX(minFrequencyHz, plot.leftX, plot.rightX);
-    const float xLow = mapSegmentedFrequencyToX(std::min(splits.lowBandEndHz, maxFrequencyHz), plot.leftX, plot.rightX);
-    const float xMid = mapSegmentedFrequencyToX(std::min(splits.midBandEndHz, maxFrequencyHz), plot.leftX, plot.rightX);
-    const float xMax = mapSegmentedFrequencyToX(maxFrequencyHz, plot.leftX, plot.rightX);
+    const float xMin = this->mapSegmentedFrequencyToX(minFrequencyHz, plot.leftX, plot.rightX);
+    const float lowBandEndHz = static_cast<float>(BandFrequencies::LowBandEndHz);
+    const float midBandEndHz = static_cast<float>(BandFrequencies::MidBandEndHz);
+    const float xLow = this->mapSegmentedFrequencyToX(std::min(lowBandEndHz, maxFrequencyHz), plot.leftX, plot.rightX);
+    const float xMid = this->mapSegmentedFrequencyToX(std::min(midBandEndHz, maxFrequencyHz), plot.leftX, plot.rightX);
+    const float xMax = this->mapSegmentedFrequencyToX(maxFrequencyHz, plot.leftX, plot.rightX);
 
     BandTints tints;
     graphics.setColour(tints.low);
@@ -331,8 +332,10 @@ void GraphicalSpectrumAnalyzer::drawPeakMarkers(Graphics& graphics, Rectangle<fl
     for (int binIndex = 0; binIndex < binCount; binIndex += this->peakStyle.step)
     {
         const float x = computeBinXPosition (binIndex, binCount, leftX, rightX);
-        const float y = bottomY - jlimit(0.0f, 1.0f, this->peaks[static_cast<size_t>(binIndex)]) * plotHeight;
-        graphics.fillRect(Rectangle(x - this->peakStyle.markerHalfWidth(), y - this->peakStyle.markerYOffset, this->peakStyle.markerWidth, this->peakStyle.markerHeight));
+        size_t bin_index = static_cast<size_t>(binIndex);
+        const float y = bottomY - jlimit(0.0f, 1.0f, this->peaks[bin_index]) * plotHeight;
+        Rectangle<float> rectangle(x - this->peakStyle.markerHalfWidth(), y - this->peakStyle.markerYOffset, this->peakStyle.markerWidth, this->peakStyle.markerHeight);
+        graphics.fillRect(rectangle);
     }
 }
 
@@ -342,6 +345,8 @@ float GraphicalSpectrumAnalyzer::computeBinXPosition(int binIndex, int binCount,
     {
         return xLeft;
     }
-    const float proportion = static_cast<float>(binIndex) / static_cast<float>(binCount - 1);
+    float bin_index = static_cast<float>(binIndex);
+    float bin_count = static_cast<float>(binCount - 1);
+    const float proportion = bin_index / bin_count;
     return xLeft + proportion * (xRight - xLeft);
 }
