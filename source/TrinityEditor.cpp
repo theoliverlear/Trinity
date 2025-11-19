@@ -93,8 +93,8 @@ TrinityAudioProcessorEditor::TrinityAudioProcessorEditor(
         const bool shouldSolo = this->btnSoloLow.getToggleState();
         this->btnSoloMid.setToggleState(false, dontSendNotification);
         this->btnSoloHigh.setToggleState(false, dontSendNotification);
-        this->processor.setSoloMode(shouldSolo ? TrinityAudioProcessor::SoloMode::Low
-                                               : TrinityAudioProcessor::SoloMode::None);
+        this->processor.setSoloMode(shouldSolo ? SoloMode::Low
+                                               : SoloMode::None);
     };
 
     this->btnSoloMid.onClick = [this]
@@ -102,8 +102,8 @@ TrinityAudioProcessorEditor::TrinityAudioProcessorEditor(
         const bool shouldSolo = this->btnSoloMid.getToggleState();
         this->btnSoloLow.setToggleState(false, dontSendNotification);
         this->btnSoloHigh.setToggleState(false, dontSendNotification);
-        this->processor.setSoloMode(shouldSolo ? TrinityAudioProcessor::SoloMode::Mid
-                                               : TrinityAudioProcessor::SoloMode::None);
+        this->processor.setSoloMode(shouldSolo ? SoloMode::Mid
+                                               : SoloMode::None);
     };
 
     this->btnSoloHigh.onClick = [this]
@@ -111,15 +111,15 @@ TrinityAudioProcessorEditor::TrinityAudioProcessorEditor(
         const bool shouldSolo = this->btnSoloHigh.getToggleState();
         this->btnSoloLow.setToggleState(false, dontSendNotification);
         this->btnSoloMid.setToggleState(false, dontSendNotification);
-        this->processor.setSoloMode(shouldSolo ? TrinityAudioProcessor::SoloMode::High
-                                               : TrinityAudioProcessor::SoloMode::None);
+        this->processor.setSoloMode(shouldSolo ? SoloMode::High
+                                               : SoloMode::None);
     };
 
     // Initial state
     this->btnSoloLow.setToggleState(false, dontSendNotification);
     this->btnSoloMid.setToggleState(false, dontSendNotification);
     this->btnSoloHigh.setToggleState(false, dontSendNotification);
-    this->processor.setSoloMode(TrinityAudioProcessor::SoloMode::None);
+    this->processor.setSoloMode(SoloMode::None);
 
     // Initialize and wire diagnostics controls
     this->btnUiSmooth.setToggleState(true, dontSendNotification);
@@ -334,10 +334,15 @@ String TrinityAudioProcessorEditor::getInitHeader(std::vector<float> tailPreSmoo
     return header;
 }
 
+bool TrinityAudioProcessorEditor::isValidDebugStream()
+{
+    return this->debugStream && this->debugStream->openedOk();
+}
+
 void TrinityAudioProcessorEditor::writeDebugCsvSnapshot()
 {
     this->ensureDebugStreamOpen();
-    if (!this->debugStream || !this->debugStream->openedOk())
+    if (!this->isValidDebugStream())
     {
         return;
     }
@@ -373,13 +378,30 @@ void TrinityAudioProcessorEditor::writeDebugCsvSnapshot()
 
     static long long csvFrameIndex = 0;
     String line;
-    line << ++csvFrameIndex << "," << hiGuardBinsLocal << "," << allowedEndBinLocal << "," << allowedEndHzLocal
-         << "," << sampleRateHzLocal << "," << fftSizeLocal << "," << displayMaxHzLocal;
-    for (float value : tailPreSmooth)  { line << "," << value; }
-    for (float value : tailPostSmooth) { line << "," << value; }
-    for (float value : tailPostTaper)  { line << "," << value; }
-    for (float value : bandsPreSmooth) { line << "," << value; }
-    for (float value : bandsFinal)     { line << "," << value; }
+    line = line << ++csvFrameIndex << "," << hiGuardBinsLocal << "," <<
+        allowedEndBinLocal << "," << allowedEndHzLocal
+        << "," << sampleRateHzLocal << "," << fftSizeLocal << "," <<
+        displayMaxHzLocal;
+    for (float value : tailPreSmooth)
+    {
+        line << "," << value;
+    }
+    for (float value : tailPostSmooth)
+    {
+        line << "," << value;
+    }
+    for (float value : tailPostTaper)
+    {
+        line << "," << value;
+    }
+    for (float value : bandsPreSmooth)
+    {
+        line << "," << value;
+    }
+    for (float value : bandsFinal)
+    {
+        line << "," << value;
+    }
     line << "\n";
     this->debugStream->writeString(line);
     this->debugStream->flush();
