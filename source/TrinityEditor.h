@@ -65,5 +65,6 @@ private:
                              std::vector<float> tailPostTaper,
                              std::vector<float> bandsPreSmooth,
                              std::vector<float> bandsFinal);
+    bool isValidDebugStream();
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TrinityAudioProcessorEditor)
 };
