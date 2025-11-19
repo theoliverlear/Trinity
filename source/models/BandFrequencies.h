@@ -1,7 +1,7 @@
 #pragma once
 
-struct BandFrequencies
+enum class BandFrequencies : int
 {
-    float lowBandEndHz { 250.0f };
-    float midBandEndHz { 2000.0f };
+    LowBandEndHz = 250,
+    MidBandEndHz = 2000
 };
