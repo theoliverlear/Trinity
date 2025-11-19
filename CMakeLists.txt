@@ -13,8 +13,14 @@ FetchContent_Declare(
         GIT_REPOSITORY https://github.com/google/googletest.git
         GIT_TAG v1.15.0
 )
+FetchContent_Declare(
+        spdlog
+        GIT_REPOSITORY https://github.com/gabime/spdlog.git
+        GIT_TAG v1.14.1
+)
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
+FetchContent_MakeAvailable(spdlog)
 
 # As a safety net, also force the MSVC runtime on gtest targets (in case toolchain defaults differ)
 if (MSVC)
@@ -80,6 +86,7 @@ target_link_libraries(Trinity PRIVATE
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags
+        spdlog::spdlog
 )
 
 # Enable and add tests
