@@ -3,6 +3,9 @@
 #include "models/BandFrequencies.h"
 #include "services/SpectrumProcessing.h"
 #include <cmath>
+#include <spdlog/sinks/stdout_color_sinks-inl.h>
+
+
 
 TrinityAudioProcessor::TrinityAudioProcessor()
     : AudioProcessor(
@@ -10,6 +13,8 @@ TrinityAudioProcessor::TrinityAudioProcessor()
             .withInput("Input",  AudioChannelSet::stereo(), true)
             .withOutput("Output", AudioChannelSet::stereo(), true))
 {
+    this->console->set_level(spdlog::level::debug);
+    this->console->info("Trinity Audio Processor started");
 }
 
 void TrinityAudioProcessor::initDspProcessSpec(double sampleRate, int samplesPerBlock, dsp::ProcessSpec& spec)
@@ -21,27 +26,26 @@ void TrinityAudioProcessor::initDspProcessSpec(double sampleRate, int samplesPer
 
 void TrinityAudioProcessor::initCrossoverFilters(dsp::ProcessSpec spec)
 {
-    BandFrequencies splits;
-    for (auto& filter : this->lowMidCrossover)
-    {
-        filter.reset();
-        filter.setType(dsp::LinkwitzRileyFilterType::lowpass);
-        filter.setCutoffFrequency(splits.lowBandEndHz);
-        filter.prepare(spec);
-    }
+    initCrossoverFilter(spec, this->lowMidCrossover, BandFrequencies::LowBandEndHz);
+    initCrossoverFilter(spec, this->midHighCrossover, BandFrequencies::MidBandEndHz);
+}
 
-    for (auto& filter : this->midHighCrossover)
+void TrinityAudioProcessor::initCrossoverFilter(dsp::ProcessSpec spec, auto& crossover, BandFrequencies bandCutoff)
+{
+
+    for (dsp::LinkwitzRileyFilter<float>& filter : crossover)
     {
         filter.reset();
         filter.setType(dsp::LinkwitzRileyFilterType::lowpass);
-        filter.setCutoffFrequency(splits.midBandEndHz);
+        float bandCutoffHz = static_cast<float>(bandCutoff);
+        filter.setCutoffFrequency(bandCutoffHz);
         filter.prepare(spec);
     }
 }
 
 void TrinityAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
-    ignoreUnused (samplesPerBlock);
+    ignoreUnused(samplesPerBlock);
     dsp::ProcessSpec spec;
     initDspProcessSpec(sampleRate, samplesPerBlock, spec);
     this->initCrossoverFilters(spec);
@@ -51,12 +55,12 @@ void TrinityAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock
     // Use non-normalised Hann and handle coherent gain explicitly in our scaling (4/N one-sided)
     this->window = std::make_unique<dsp::WindowingFunction<float>> (fftSize, dsp::WindowingFunction<float>::hann, false);
 
-    this->fifo.assign (fftSize, 0.0f);
-    this->fftTime.assign (fftSize, 0.0f);
-    this->fftData.assign (2 * fftSize, 0.0f);
+    this->fifo.assign(fftSize, 0.0f);
+    this->fftTime.assign(fftSize, 0.0f);
+    this->fftData.assign(2 * fftSize, 0.0f);
     // spectrum holds log-averaged bands for UI; will be sized in buildLogBands
     this->spectrum.clear();
-    this->spectrumPowerSmoothed.assign (fftSize / 2, 0.0f);
+    this->spectrumPowerSmoothed.assign(fftSize / 2, 0.0f);
     this->fifoIndex = 0;
 
     // Set current SR and (re)build band mapping for log display
@@ -169,8 +173,8 @@ void TrinityAudioProcessor::processBlock(AudioBuffer<float>& buffer,
             float midSample = 0.0f;
             float highSample = 0.0f;
 
-            this->lowMidCrossover[channel].processSample (0, inSample, lowSample, residual);
-            this->midHighCrossover[channel].processSample (0, residual, midSample, highSample);
+            this->lowMidCrossover[channel].processSample(0, inSample, lowSample, residual);
+            this->midHighCrossover[channel].processSample(0, residual, midSample, highSample);
 
             const float lowSamplePeak = std::abs(lowSample);
             const float midSamplePeak = std::abs(midSample);
@@ -183,11 +187,19 @@ void TrinityAudioProcessor::processBlock(AudioBuffer<float>& buffer,
             float outSample = 0.0f;
             switch (currentSolo)
             {
-                case SoloMode::Low:   outSample = lowSample; break;
-                case SoloMode::Mid:   outSample = midSample; break;
-                case SoloMode::High:  outSample = highSample; break;
+                case SoloMode::Low:
+                    outSample = lowSample;
+                    break;
+                case SoloMode::Mid:
+                    outSample = midSample;
+                    break;
+                case SoloMode::High:
+                    outSample = highSample;
+                    break;
                 case SoloMode::None:
-                default: outSample = lowSample + midSample + highSample; break;
+                default:
+                    outSample = lowSample + midSample + highSample;
+                    break;
             }
 
             writePtr[sampleIndex] = outSample;
@@ -322,7 +334,7 @@ void TrinityAudioProcessor::processBlock(AudioBuffer<float>& buffer,
 
                 auto& bands = this->tempBands;
                 auto& bandsPreSmooth = this->tempBandsPreSmooth;
-                // Frequency resolution per FFT bin (Hz per bin)
+                // Hz-per-bin for current FFT configuration
                 const double binHz = this->currentSampleRate / static_cast<double>(fftSize);
                 SpectrumProcessing::aggregateBandsFractional(powerForAggregation,
                                                              allowedEnd,
@@ -413,6 +425,7 @@ AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 void TrinityAudioProcessor::releaseResources()
 {
     // Release heavy DSP resources
+    this->console->info("Releasing resources...");
     this->fft.reset();
     this->window.reset();
 
