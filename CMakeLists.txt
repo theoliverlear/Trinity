@@ -64,6 +64,7 @@ target_sources(Trinity PRIVATE
         source/TrinityProcessor.h
         source/TrinityEditor.cpp
         source/TrinityEditor.h
+        source/services/AudioProcessorTest.h
         source/components/AudioMeter.cpp
         source/components/AudioMeter.h
         source/components/AudioSpectrumMeters.cpp
