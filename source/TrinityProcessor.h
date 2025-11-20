@@ -9,6 +9,8 @@
 
 #include "models/BandFrequencies.h"
 #include "models/SoloMode.h"
+#include "services/AudioProcessorTest.h"
+#include "models/SignalDebugBin.h"
 
 class TrinityAudioProcessor : public AudioProcessor
 {
@@ -23,18 +25,42 @@ public:
     static void initCrossoverFilter(dsp::ProcessSpec spec, auto& crossover, BandFrequencies bandCutoff);
     ~TrinityAudioProcessor() override = default;
 
-    const String getName() const override { return "Trinity"; }
+    const String getName() const override
+    {
+        return "Trinity";
+    }
 
-    bool acceptsMidi() const override { return false; }
-    bool producesMidi() const override { return false; }
-    bool isMidiEffect() const override { return false; }
+    bool acceptsMidi() const override
+    {
+        return false;
+    }
+    bool producesMidi() const override
+    {
+        return false;
+    }
+    bool isMidiEffect() const override
+    {
+        return false;
+    }
 
-    double getTailLengthSeconds() const override { return 0.0; }
+    double getTailLengthSeconds() const override
+    {
+        return 0.0;
+    }
 
-    int getNumPrograms() override { return 1; }
-    int getCurrentProgram() override { return 0; }
+    int getNumPrograms() override
+    {
+        return 1;
+    }
+    int getCurrentProgram() override
+    {
+        return 0;
+    }
     void setCurrentProgram(int) override {}
-    const String getProgramName(int) override { return "Default"; }
+    const String getProgramName(int) override
+    {
+        return "Default";
+    }
     void changeProgramName(int, const String&) override {}
 
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
@@ -46,55 +72,74 @@ public:
     void processBlock(AudioBuffer<double>&, MidiBuffer&) override;
 
     AudioProcessorEditor* createEditor() override;
-    bool hasEditor() const override { return true; }
+    bool hasEditor() const override
+    {
+        return true;
+    }
 
     void getStateInformation(MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
 
-    float getRMSLevel() const noexcept { return rmsLevel.load(); }
+    float getRMSLevel() const noexcept
+    {
+        return rmsLevel.load();
+    }
 
-    float getTotalLevel() const noexcept { return totalLevel.load(); }
-    float getLowLevel() const noexcept { return lowLevel.load(); }
-    float getMidLevel() const noexcept { return midLevel.load(); }
-    float getHighLevel() const noexcept { return highLevel.load(); }
+    float getTotalLevel() const noexcept
+    {
+        return totalLevel.load();
+    }
+    float getLowLevel() const noexcept
+    {
+        return lowLevel.load();
+    }
+    float getMidLevel() const noexcept
+    {
+        return midLevel.load();
+    }
+    float getHighLevel() const noexcept
+    {
+        return highLevel.load();
+    }
 
     // Copy latest spectrum magnitudes [0..1] into dest (thread-safe).
     void copySpectrum (std::vector<float>& dest) const;
     void addBandFrequencyData(double bandStartHz, double bandEndHz, int bin0,
                               int bin1);
 
-    void setSoloMode (SoloMode mode) noexcept { soloMode.store (mode); }
-    SoloMode getSoloMode() const noexcept      { return soloMode.load(); }
+    void setSoloMode (SoloMode mode) noexcept
+    {
+        soloMode.store (mode);
+    }
+    SoloMode getSoloMode() const noexcept
+    {
+        return soloMode.load();
+    }
 
     // Display range helper for the editor (upper frequency bound after guards)
-    double getDisplayMaxHz() const noexcept { return displayMaxHz; }
-
-    // Debug export: copy last few FFT tail bins (after processing) and current bands
-    void copyDebugData(std::vector<float>& tailBins,
-                        std::vector<float>& bands,
-                        int& outHiGuard,
-                        double& outSampleRate,
-                        int& outFftSize,
-                        double& outDisplayMaxHz) const;
-
-    // Built-in test signal generator controls (Standalone convenience)
-    // TODO: Move to its own file.
-    enum TestSignalType
+    double getDisplayMaxHz() const noexcept
     {
-        kOff = 0,
-        kSine17k = 1,
-        kSine19k = 2,
-        kWhiteNoise = 3,
-        kPinkNoise = 4,
-        kLogSweep = 5
-    };
+        return displayMaxHz;
+    }
 
-    void setTestEnabled (bool enabled) noexcept { testEnabled.store (enabled); }
-    void setTestType (int type) noexcept { testType.store (type); }
+    // Debug export is provided by the extended version below.
+
+
+    void setTestEnabled (bool enabled) noexcept
+    {
+        testSignalGenerator.setEnabled(enabled);
+    }
+    void setTestType (int type) noexcept
+    {
+        testSignalGenerator.setType(type);
+    }
 
     // Enable/disable debug capture of tail bins and pre-smooth bands to avoid
     // allocations in the audio thread when not needed (prevents crackles).
-    void setDebugCaptureEnabled (bool enabled) noexcept { debugCaptureEnabled.store (enabled); }
+    void setDebugCaptureEnabled (bool enabled) noexcept
+    {
+        debugBin.debugCaptureEnabled.store(enabled);
+    }
 
 private:
     std::shared_ptr<spdlog::logger> console { spdlog::stdout_color_mt("Trinity") };
@@ -168,9 +213,11 @@ public:
         this->bandSmoothEnabled.store(newBandSmoothingEnabled);
     }
     void setGuardPercent(float newGuardPercent) noexcept;
+
     void setTaperPercent(float newTaperPercent) noexcept
     {
-        this->taperPercent.store(jlimit(0.0f, 0.2f, newTaperPercent));
+        float limitedPercent = jlimit(0.0f, 0.2f, newTaperPercent);
+        this->taperPercent.store(limitedPercent);
     }
     void setSpecSmoothing(float newSpecSmoothing) noexcept
     {
@@ -178,38 +225,24 @@ public:
     }
 
     // ===== Test signal generator (Standalone convenience) =====
-    std::atomic<bool> testEnabled { false };
-    std::atomic<int> testType { kOff };
-    float testPhase { 0.0f };
-    float sweepPhase { 0.0f };
-    long long sweepSampleCount { 0 };
-    long long sweepTotalSamples { 0 };
-    Random rng;
-    // simple pink-ish noise one-pole filter state
-    float pinkZ1 { 0.0f };
-    float pinkCoeff { 0.02f }; // very light tilt, not critical (debug use)
-
-    void generateTestSignal (AudioBuffer<float>& buffer);
+    void generateTestSignal(AudioBuffer<float>& buffer);
 
     // ===== Debug capture =====
     mutable SpinLock spectrumLock;  // protect spectrum access
-    std::atomic<bool> debugCaptureEnabled { false }; // gate debug vectors
-    // Debug arrays
-    std::vector<float> debugTailBinsPreSmooth;   // tail bins before freq smoothing/taper (after temporal smooth)
-    std::vector<float> debugTailBinsPostSmooth;  // tail bins after freq smoothing (pre-taper)
-    std::vector<float> debugTailBinsPostTaper;   // tail bins after taper
-    std::vector<float> debugBandsPreBandSmooth;  // bands before band-domain smoothing
+    // Bundle all debug-related buffers/flags into a single struct
+    SignalDebugBin debugBin;
 
     // ===== Temporary buffers to avoid allocations in the audio thread =====
     std::vector<float> tempPowerForAggregation;   // size numBins
     std::vector<float> tempBands;                 // size numBands
     std::vector<float> tempBandsPreSmooth;        // size numBands
     std::vector<float> tempBandsSmooth;           // size numBands (for smoothing output)
-    juce::AudioBuffer<float> tempDoubleBuffer;    // reused in processBlock(double)
+    AudioBuffer<float> tempDoubleBuffer;    // reused in processBlock(double)
 
+    AudioTestProcessor testSignalGenerator;
 public:
     // Extended debug export
-    void copyDebugData (std::vector<float>& tailPreSmooth,
+    void copyDebugData(std::vector<float>& tailPreSmooth,
                         std::vector<float>& tailPostSmooth,
                         std::vector<float>& tailPostTaper,
                         std::vector<float>& bandsPreBandSmooth,
@@ -226,7 +259,10 @@ private:
     static float mixDownToMonoSample(const AudioBuffer<float>& buffer, int sampleIndex) noexcept
     {
         const int channels = buffer.getNumChannels();
-        if (channels <= 0) { return 0.0f; }
+        if (channels <= 0)
+        {
+            return 0.0f;
+        }
         float sum = 0.0f;
         for (int channel = 0; channel < channels; ++channel)
         {
