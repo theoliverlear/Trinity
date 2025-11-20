@@ -31,12 +31,12 @@ void TrinityAudioProcessorEditor::initSpectrumAnalyzerControls()
 
 void TrinityAudioProcessorEditor::initSpectrumAnalyzerButtons()
 {
-    this->cbxTestType.addItem("Sine 17 kHz",  TrinityAudioProcessor::kSine17k);
-    this->cbxTestType.addItem("Sine 19 kHz",  TrinityAudioProcessor::kSine19k);
-    this->cbxTestType.addItem("White noise",  TrinityAudioProcessor::kWhiteNoise);
-    this->cbxTestType.addItem("Pink-ish noise", TrinityAudioProcessor::kPinkNoise);
-    this->cbxTestType.addItem("Log sweep",    TrinityAudioProcessor::kLogSweep);
-    this->cbxTestType.setSelectedId(TrinityAudioProcessor::kSine17k, dontSendNotification);
+    this->cbxTestType.addItem("Sine 17 kHz",  kSine17k);
+    this->cbxTestType.addItem("Sine 19 kHz",  kSine19k);
+    this->cbxTestType.addItem("White noise",  kWhiteNoise);
+    this->cbxTestType.addItem("Pink-ish noise", kPinkNoise);
+    this->cbxTestType.addItem("Log sweep",    kLogSweep);
+    this->cbxTestType.setSelectedId(kSine17k, dontSendNotification);
 }
 
 TrinityAudioProcessorEditor::TrinityAudioProcessorEditor(
