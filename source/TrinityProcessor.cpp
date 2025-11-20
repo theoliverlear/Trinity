@@ -73,6 +73,8 @@ void TrinityAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock
     }
     this->buildLogBands();
 
+    this->testSignalGenerator.prepare(this->currentSampleRate, this->displayMaxHz);
+
     // Pre-size reusable temporary buffers to avoid allocations in audio thread
     {
         const int numBins = fftSize / 2;
@@ -98,12 +100,6 @@ void TrinityAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock
     // For Hann, coherent gain ~= 0.5. Apply 2/N for one-sided spectrum and divide by 0.5 => 4/N.
     this->fftAmplitudeScale = 4.0f / static_cast<float>(fftSize);
 
-    // Test generator reset
-    this->testPhase = 0.0f;
-    this->sweepPhase = 0.0f;
-    this->sweepSampleCount = 0;
-    this->sweepTotalSamples = static_cast<long long>(this->currentSampleRate * 10.0); // 10-second sweep
-    this->pinkZ1 = 0.0f;
 }
 
 bool TrinityAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
@@ -134,7 +130,7 @@ void TrinityAudioProcessor::processBlock(AudioBuffer<float>& buffer,
     const int numSamples = buffer.getNumSamples();
 
     // Optional: generate built-in test signal (Standalone convenience)
-    if (this->testEnabled.load())
+    if (this->testSignalGenerator.isEnabled())
     {
         this->generateTestSignal (buffer);
     }
@@ -265,14 +261,14 @@ void TrinityAudioProcessor::processBlock(AudioBuffer<float>& buffer,
                 const int captureCount = 64;
                 const int allowedEndRaw = numBins - 1; // before guard/taper
                 const int startRaw = jlimit (0, allowedEndRaw, allowedEndRaw - (captureCount - 1));
-                if (this->debugCaptureEnabled.load())
+                if (this->debugBin.debugCaptureEnabled.load())
                 {
                     const SpinLock::ScopedLockType sl (this->spectrumLock);
-                    this->debugTailBinsPreSmooth.resize ((size_t) (allowedEndRaw - startRaw + 1));
+                    this->debugBin.debugTailBinsPreSmooth.resize ((size_t) (allowedEndRaw - startRaw + 1));
                     int destIndex = 0;
                     for (int bin = startRaw; bin <= allowedEndRaw; ++bin)
                     {
-                        this->debugTailBinsPreSmooth[static_cast<size_t>(destIndex++)] = this->spectrumPowerSmoothed[static_cast<size_t>(bin)];
+                        this->debugBin.debugTailBinsPreSmooth[static_cast<size_t>(destIndex++)] = this->spectrumPowerSmoothed[static_cast<size_t>(bin)];
                     }
                 }
 
@@ -294,16 +290,16 @@ void TrinityAudioProcessor::processBlock(AudioBuffer<float>& buffer,
                                                                        this->freqSmoothEnabled.load());
 
                 // Capture tail after freq smoothing (pre-taper)
-                if (this->debugCaptureEnabled.load())
+                if (this->debugBin.debugCaptureEnabled.load())
                 {
                     const SpinLock::ScopedLockType sl (this->spectrumLock);
                     const int endBin = jlimit(0, numBins - 1, allowedEnd);
                     const int startBin = jlimit(0, endBin, endBin - (captureCount - 1));
-                    this->debugTailBinsPostSmooth.resize(static_cast<size_t>(endBin - startBin + 1));
+                    this->debugBin.debugTailBinsPostSmooth.resize(static_cast<size_t>(endBin - startBin + 1));
                     int destIndex = 0;
                     for (int bin = startBin; bin <= endBin; ++bin)
                     {
-                        this->debugTailBinsPostSmooth[static_cast<size_t>(destIndex++)] = powerForAggregation[static_cast<size_t>(bin)];
+                        this->debugBin.debugTailBinsPostSmooth[static_cast<size_t>(destIndex++)] = powerForAggregation[static_cast<size_t>(bin)];
                     }
                 }
 
@@ -313,16 +309,16 @@ void TrinityAudioProcessor::processBlock(AudioBuffer<float>& buffer,
 
                 // Capture tail after taper
                 int allowedEndBin = jlimit(0, numBins - 1, allowedEnd);
-                if (this->debugCaptureEnabled.load())
+                if (this->debugBin.debugCaptureEnabled.load())
                 {
                     const SpinLock::ScopedLockType spinLock (this->spectrumLock);
                     const int endBin = allowedEndBin;
                     const int startBin = jlimit(0, endBin, endBin - (captureCount - 1));
-                    this->debugTailBinsPostTaper.resize (static_cast<size_t>(endBin - startBin + 1));
+                    this->debugBin.debugTailBinsPostTaper.resize (static_cast<size_t>(endBin - startBin + 1));
                     int destIndex = 0;
                     for (int bin = startBin; bin <= endBin; ++bin)
                     {
-                        this->debugTailBinsPostTaper[static_cast<size_t>(destIndex++)] = powerForAggregation[static_cast<size_t>(bin)];
+                        this->debugBin.debugTailBinsPostTaper[static_cast<size_t>(destIndex++)] = powerForAggregation[static_cast<size_t>(bin)];
                     }
                 }
 
@@ -356,9 +352,10 @@ void TrinityAudioProcessor::processBlock(AudioBuffer<float>& buffer,
                 {
                     const SpinLock::ScopedLockType sl (this->spectrumLock);
                     this->spectrum = bands;                 // copy from reusable buffer
-                    if (this->debugCaptureEnabled.load())
+                    if (this->debugBin.debugCaptureEnabled.load())
                     {
-                        this->debugBandsPreBandSmooth = bandsPreSmooth;
+                        this->debugBin.debugTailBinsPreSmooth.shrink_to_fit(); // no-op safety; keep struct usage consistent
+                        this->debugBin.debugBandsPreBandSmooth = bandsPreSmooth;
                     }
                 }
 
@@ -444,10 +441,10 @@ void TrinityAudioProcessor::releaseResources()
     this->tempBands.clear(); this->tempBands.shrink_to_fit();
     this->tempBandsPreSmooth.clear(); this->tempBandsPreSmooth.shrink_to_fit();
 
-    this->debugTailBinsPreSmooth.clear(); this->debugTailBinsPreSmooth.shrink_to_fit();
-    this->debugTailBinsPostSmooth.clear(); this->debugTailBinsPostSmooth.shrink_to_fit();
-    this->debugTailBinsPostTaper.clear(); this->debugTailBinsPostTaper.shrink_to_fit();
-    this->debugBandsPreBandSmooth.clear(); this->debugBandsPreBandSmooth.shrink_to_fit();
+    this->debugBin.debugTailBinsPreSmooth.clear(); this->debugBin.debugTailBinsPreSmooth.shrink_to_fit();
+    this->debugBin.debugTailBinsPostSmooth.clear(); this->debugBin.debugTailBinsPostSmooth.shrink_to_fit();
+    this->debugBin.debugTailBinsPostTaper.clear(); this->debugBin.debugTailBinsPostTaper.shrink_to_fit();
+    this->debugBin.debugBandsPreBandSmooth.clear(); this->debugBin.debugBandsPreBandSmooth.shrink_to_fit();
 
     this->tempDoubleBuffer.setSize(0, 0);
     this->fifoIndex = 0;
@@ -535,16 +532,16 @@ void TrinityAudioProcessor::copyDebugData(std::vector<float>& tailPreSmooth,
                                            double& outDisplayMaxHz) const
 {
     const SpinLock::ScopedLockType scopedLock (this->spectrumLock);
-    tailPreSmooth = this->debugTailBinsPreSmooth;
-    tailPostSmooth = this->debugTailBinsPostSmooth;
-    tailPostTaper = this->debugTailBinsPostTaper;
-    bandsPreBandSmooth = this->debugBandsPreBandSmooth;
+    tailPreSmooth = this->debugBin.debugTailBinsPreSmooth;
+    tailPostSmooth = this->debugBin.debugTailBinsPostSmooth;
+    tailPostTaper = this->debugBin.debugTailBinsPostTaper;
+    bandsPreBandSmooth = this->debugBin.debugBandsPreBandSmooth;
     bandsFinal = this->spectrum;
     outHiGuard = this->hiGuardBins;
     const int numBins = fftSize / 2;
     const double binHz = this->currentSampleRate / static_cast<double>(fftSize);
     const int allowedEndByGuard = jlimit(0, numBins - 1, numBins - this->hiGuardBins - 1);
-    const int capBy20k = jlimit(0, numBins - 1, (int) std::floor (20000.0 / binHz) - 1);
+    const int capBy20k = jlimit(0, numBins - 1, (int) std::floor(20000.0 / binHz) - 1);
     const int allowedEndBin = jlimit(0, numBins - 1, jmin (allowedEndByGuard, capBy20k));
     outAllowedEndBin = allowedEndBin;
     outAllowedEndHz = std::min(20000.0, static_cast<double>(allowedEndBin + 1) * binHz);
@@ -564,79 +561,6 @@ void TrinityAudioProcessor::setGuardPercent(float newGuardPercent) noexcept
 
 void TrinityAudioProcessor::generateTestSignal(AudioBuffer<float>& buffer)
 {
-    const int numSamples = buffer.getNumSamples();
-    const double sampleRateHz = this->currentSampleRate;
-    const float amplitude = 0.25f;
-    const int selectedType = this->testType.load();
-
-    switch (selectedType)
-    {
-        case kSine17k:
-        case kSine19k:
-        {
-            const double frequencyHz = selectedType == kSine17k ? 17000.0 : 19000.0;
-            const float phaseIncrement = MathConstants<float>::twoPi * static_cast<float>(frequencyHz / sampleRateHz);
-            for (int sampleIndex = 0; sampleIndex < numSamples; ++sampleIndex)
-            {
-                float sample = std::sin(this->testPhase) * amplitude;
-                this->testPhase += phaseIncrement;
-                if (this->testPhase > MathConstants<float>::twoPi)
-                {
-                    this->testPhase -= MathConstants<float>::twoPi;
-                }
-                this->writeSampleToAllChannels(buffer, sampleIndex, sample);
-            }
-            break;
-        }
-        case kWhiteNoise:
-        {
-            for (int sampleIndex = 0; sampleIndex < numSamples; ++sampleIndex)
-            {
-                float sample = (this->rng.nextFloat() * 2.0f - 1.0f) * amplitude;
-                this->writeSampleToAllChannels(buffer, sampleIndex, sample);
-            }
-            break;
-        }
-        case kPinkNoise:
-        {
-            for (int sampleIndex = 0; sampleIndex < numSamples; ++sampleIndex)
-            {
-                float white = (this->rng.nextFloat() * 2.0f - 1.0f) * amplitude;
-                // crude pink-ish: low-pass the white slightly
-                this->pinkZ1 = this->pinkZ1 + this->pinkCoeff * (white - this->pinkZ1);
-                float sample = this->pinkZ1;
-                this->writeSampleToAllChannels(buffer, sampleIndex, sample);
-            }
-            break;
-        }
-        case kLogSweep:
-        {
-            const double sweepStartHz = 20.0;
-            const double sweepEndHz = this->displayMaxHz > sweepStartHz ? this->displayMaxHz : sampleRateHz * 0.5 * 0.97;
-            const double sweepDurationSeconds = this->sweepTotalSamples > 0 ? static_cast<double>(this->sweepTotalSamples) / sampleRateHz : 10.0;
-            for (int sampleIndex = 0; sampleIndex < numSamples; ++sampleIndex)
-            {
-                const double timeSeconds = static_cast<double>(this->sweepSampleCount) / sampleRateHz;
-                const double sweepRatio = std::pow(sweepEndHz / sweepStartHz, 1.0 / sweepDurationSeconds);
-                const double instantFreqHz = sweepStartHz * std::pow(sweepRatio, timeSeconds);
-                const float phaseIncrement = MathConstants<float>::twoPi * static_cast<float>(instantFreqHz / sampleRateHz);
-                this->sweepPhase += phaseIncrement;
-                if (this->sweepPhase > MathConstants<float>::twoPi)
-                {
-                    this->sweepPhase -= MathConstants<float>::twoPi;
-                }
-                float sample = std::sin(this->sweepPhase) * amplitude;
-                this->writeSampleToAllChannels(buffer, sampleIndex, sample);
-                ++this->sweepSampleCount;
-                if (this->sweepSampleCount >= this->sweepTotalSamples)
-                {
-                    this->sweepSampleCount = 0;
-                }
-            }
-            break;
-        }
-        default:
-            // kOff or unknown: do nothing, keep incoming audio
-            break;
-    }
+    // Delegate to the outsourced generator
+    this->testSignalGenerator.generate(buffer);
 }
